@@ -1,0 +1,374 @@
+import 'package:flutter/foundation.dart';
+import 'dart:async';
+import '../models/workout.dart';
+import '../models/workout_set.dart';
+import '../services/notification_service.dart';
+import '../services/audio_service.dart';
+
+enum TimerState { idle, running, paused, completed }
+enum ExercisePhase { transition, active }
+
+/// Represents a flattened exercise in the workout with its context
+class WorkoutExercise {
+  final WorkoutSet set;
+  final int currentRound;
+  final int totalRounds;
+  final List<String> breadcrumb; // Path to this exercise
+  
+  WorkoutExercise({
+    required this.set,
+    required this.currentRound,
+    required this.totalRounds,
+    required this.breadcrumb,
+  });
+  
+  String get displayName => set.name;
+  String get breadcrumbPath => breadcrumb.join(' > ');
+  
+  /// Check if this exercise requires a timer
+  bool get needsTimer {
+    if (set.type == SetType.time) return true;
+    if (set.type == SetType.reps && set.duration != null) return true;
+    return false;
+  }
+  
+  /// Check if this exercise requires manual completion
+  bool get requiresManualCompletion {
+    return set.type == SetType.reps && set.duration == null;
+  }
+}
+
+class WorkoutTimerProvider extends ChangeNotifier {
+  final Workout workout;
+  
+  // Timer state
+  TimerState _state = TimerState.idle;
+  ExercisePhase _phase = ExercisePhase.transition;
+  Timer? _timer;
+  
+  // Exercise progression
+  final List<WorkoutExercise> _exercises = [];
+  int _currentExerciseIndex = 0;
+  double _remainingSeconds = 0;
+  double _totalExerciseSeconds = 0;
+  
+  // Overall workout progress
+  int _completedExercises = 0;
+  
+  // Services
+  final NotificationService _notificationService = NotificationService();
+  final AudioService _audioService = AudioService();
+  
+  // Track last countdown second to avoid duplicate sounds
+  int _lastCountdownSecond = -1;
+  
+  WorkoutTimerProvider(this.workout) {
+    _notificationService.initialize();
+    _flattenWorkout();
+    if (_exercises.isNotEmpty) {
+      _initializeExercise(0);
+    }
+  }
+  
+  // Getters
+  TimerState get state => _state;
+  ExercisePhase get phase => _phase;
+  bool get isRunning => _state == TimerState.running;
+  bool get isPaused => _state == TimerState.paused;
+  bool get isCompleted => _state == TimerState.completed;
+  bool get isIdle => _state == TimerState.idle;
+  bool get isTransition => _phase == ExercisePhase.transition;
+  bool get isActive => _phase == ExercisePhase.active;
+  
+  WorkoutExercise? get currentExercise => 
+      _exercises.isNotEmpty ? _exercises[_currentExerciseIndex] : null;
+  
+  int get currentExerciseNumber => _currentExerciseIndex + 1;
+  int get totalExercises => _exercises.length;
+  double get remainingSeconds => _remainingSeconds;
+  double get totalExerciseSeconds => _totalExerciseSeconds;
+  double get progress => _totalExerciseSeconds > 0 
+      ? 1 - (_remainingSeconds / _totalExerciseSeconds) 
+      : 0;
+  
+  int get completedExercises => _completedExercises;
+  
+  String get remainingTimeFormatted {
+    final minutes = (_remainingSeconds / 60).floor();
+    final seconds = (_remainingSeconds % 60).ceil();
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+  
+  // Actions
+  void start() {
+    if (_state == TimerState.idle || _state == TimerState.paused) {
+      _state = TimerState.running;
+      _startTimer();
+      notifyListeners();
+    }
+  }
+  
+  void pause() {
+    if (_state == TimerState.running) {
+      _state = TimerState.paused;
+      _timer?.cancel();
+      notifyListeners();
+    }
+  }
+  
+  void stop() {
+    _timer?.cancel();
+    _state = TimerState.idle;
+    _currentExerciseIndex = 0;
+    _completedExercises = 0;
+    _phase = ExercisePhase.transition;
+    _initializeExercise(0);
+    notifyListeners();
+  }
+  
+  /// Complete current exercise (for rep-based exercises without timer)
+  void completeExercise() {
+    final exercise = currentExercise;
+    if (exercise != null && exercise.requiresManualCompletion && _phase == ExercisePhase.active) {
+      _playNotificationSound();
+      _moveToNextExercise();
+    }
+  }
+  
+  void skipToNext() {
+    // Skip directly to next exercise's active phase
+    if (_currentExerciseIndex < _exercises.length - 1) {
+      _currentExerciseIndex++;
+      if (_completedExercises < _currentExerciseIndex) {
+        _completedExercises = _currentExerciseIndex;
+      }
+      _startExerciseActive(_currentExerciseIndex);
+      
+      // Restart timer if we were running
+      if (_state == TimerState.running) {
+        _startTimer();
+      }
+      
+      notifyListeners();
+    } else {
+      _completeWorkout();
+    }
+  }
+  
+  void skipToPrevious() {
+    // Skip directly to previous exercise's active phase
+    if (_currentExerciseIndex > 0) {
+      _currentExerciseIndex--;
+      if (_completedExercises > 0) {
+        _completedExercises--;
+      }
+      _startExerciseActive(_currentExerciseIndex);
+      
+      // Restart timer if we were running
+      if (_state == TimerState.running) {
+        _startTimer();
+      }
+      
+      notifyListeners();
+    }
+  }
+  
+  // Private methods
+  void _startTimer() {
+    _timer?.cancel();
+    _lastCountdownSecond = -1;
+    _timer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (_remainingSeconds > 0) {
+        // Play countdown sound BEFORE decrementing (so we beep at 5, 4, 3, 2, 1)
+        final currentSecond = _remainingSeconds.ceil();
+        if (currentSecond <= 5 && currentSecond > 0 && currentSecond != _lastCountdownSecond) {
+          _lastCountdownSecond = currentSecond;
+          _playCountdownSound();
+        }
+        
+        _remainingSeconds -= 0.1;
+        if (_remainingSeconds < 0) _remainingSeconds = 0;
+        
+        notifyListeners();
+        
+        // If we just hit zero, complete immediately
+        if (_remainingSeconds <= 0) {
+          _onTimerComplete();
+        }
+      }
+    });
+  }
+  
+  void _onTimerComplete() {
+    if (_phase == ExercisePhase.transition) {
+      // Transition complete, start the actual exercise
+      _phase = ExercisePhase.active;
+      _playNotificationSound(); // Play complete sound to signal exercise start
+      
+      final exercise = currentExercise;
+      if (exercise != null) {
+        // Send notification about starting exercise NOW
+        _notificationService.showExerciseNotification(
+          exerciseName: exercise.displayName,
+          description: exercise.set.description ?? 'Start your exercise now!',
+        );
+        
+        if (exercise.needsTimer) {
+          // Start timer for timed exercises
+          if (exercise.set.type == SetType.time) {
+            _totalExerciseSeconds = exercise.set.value!;
+            _remainingSeconds = exercise.set.value!;
+          } else if (exercise.set.type == SetType.reps && exercise.set.duration != null) {
+            _totalExerciseSeconds = exercise.set.duration!;
+            _remainingSeconds = exercise.set.duration!;
+          }
+          _lastCountdownSecond = -1; // Reset countdown tracker
+          notifyListeners();
+        } else {
+          // Manual completion required - stop timer
+          _timer?.cancel();
+          notifyListeners();
+        }
+      }
+    } else {
+      // Exercise complete
+      _playNotificationSound();
+      _moveToNextExercise();
+    }
+  }
+  
+  void _moveToNextExercise() {
+    _completedExercises++;
+    
+    if (_currentExerciseIndex < _exercises.length - 1) {
+      // Notify about next exercise BEFORE transitioning
+      final nextExercise = _exercises[_currentExerciseIndex + 1];
+      _notificationService.showTransitionNotification(
+        nextExerciseName: nextExercise.displayName,
+        secondsRemaining: nextExercise.set.effectiveTransitionTime.toInt(),
+      );
+      
+      _currentExerciseIndex++;
+      _initializeExercise(_currentExerciseIndex);
+      
+      // Restart the timer if we were running
+      if (_state == TimerState.running) {
+        _startTimer();
+      }
+      
+      notifyListeners();
+    } else {
+      _completeWorkout();
+    }
+  }
+  
+  void _completeWorkout() {
+    _timer?.cancel();
+    _state = TimerState.completed;
+    _playNotificationSound();
+    _notificationService.showWorkoutCompleteNotification();
+    notifyListeners();
+  }
+  
+  void _initializeExercise(int index) {
+    if (index >= _exercises.length) return;
+    
+    final exercise = _exercises[index];
+    
+    // Always start with transition phase
+    _phase = ExercisePhase.transition;
+    _totalExerciseSeconds = exercise.set.effectiveTransitionTime;
+    _remainingSeconds = exercise.set.effectiveTransitionTime;
+    _lastCountdownSecond = -1; // Reset countdown tracker
+  }
+  
+  /// Start an exercise directly in active phase (used for navigation)
+  void _startExerciseActive(int index) {
+    if (index >= _exercises.length) return;
+    
+    final exercise = _exercises[index];
+    
+    // Skip transition, go directly to active phase
+    _phase = ExercisePhase.active;
+    
+    if (exercise.needsTimer) {
+      if (exercise.set.type == SetType.time) {
+        _totalExerciseSeconds = exercise.set.value!;
+        _remainingSeconds = exercise.set.value!;
+      } else if (exercise.set.type == SetType.reps && exercise.set.duration != null) {
+        _totalExerciseSeconds = exercise.set.duration!;
+        _remainingSeconds = exercise.set.duration!;
+      }
+      _lastCountdownSecond = -1; // Reset countdown tracker
+    } else {
+      // Manual completion - no timer
+      _totalExerciseSeconds = 0;
+      _remainingSeconds = 0;
+      _timer?.cancel();
+    }
+  }
+  
+  void _playNotificationSound() {
+    // Play audio notification
+    _audioService.playNotification();
+  }
+  
+  void _playCountdownSound() {
+    // Play audio countdown
+    _audioService.playCountdown();
+  }
+  
+  void _flattenWorkout() {
+    _exercises.clear();
+    for (final set in workout.sets) {
+      _flattenSet(set, []);
+    }
+  }
+  
+  void _flattenSet(WorkoutSet set, List<String> parentBreadcrumb) {
+    final breadcrumb = [...parentBreadcrumb, set.name];
+    
+    if (set.isLeaf) {
+      // Leaf set - add to exercises list
+      final rounds = set.rounds ?? 1;
+      for (int r = 1; r <= rounds; r++) {
+        _exercises.add(WorkoutExercise(
+          set: set,
+          currentRound: r,
+          totalRounds: rounds,
+          breadcrumb: breadcrumb,
+        ));
+      }
+    } else if (set.isContainer && set.sets != null) {
+      // Container set - flatten children
+      final rounds = set.effectiveRounds;
+      for (int r = 1; r <= rounds; r++) {
+        for (final childSet in set.sets!) {
+          _flattenSet(childSet, breadcrumb);
+        }
+        
+        // Add rest period after each round (except the last)
+        if (set.restBetweenRounds != null && r < rounds) {
+          _exercises.add(WorkoutExercise(
+            set: WorkoutSet(
+              name: 'Rest',
+              description: 'Rest between rounds',
+              type: SetType.time,
+              value: set.restBetweenRounds,
+              transitionTime: 0, // No transition for rest periods
+            ),
+            currentRound: r,
+            totalRounds: rounds,
+            breadcrumb: [...breadcrumb, 'Rest'],
+          ));
+        }
+      }
+    }
+  }
+  
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+}
