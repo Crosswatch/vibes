@@ -67,6 +67,13 @@ class WorkoutTimerProvider extends ChangeNotifier {
     _flattenWorkout();
     if (_exercises.isNotEmpty) {
       _initializeExercise(0);
+      // Automatically start the workout after a 1-second delay
+      _state = TimerState.running;
+      Future.delayed(const Duration(milliseconds: 1000), () {
+        if (_state == TimerState.running) {
+          _startTimer();
+        }
+      });
     }
   }
   
@@ -250,13 +257,17 @@ class WorkoutTimerProvider extends ChangeNotifier {
       
       _currentExerciseIndex++;
       _initializeExercise(_currentExerciseIndex);
-      
-      // Restart the timer if we were running
-      if (_state == TimerState.running) {
-        _startTimer();
-      }
-      
       notifyListeners();
+      
+      // Add a small delay before starting the next timer to avoid audio collision
+      // with the completion sound
+      if (_state == TimerState.running) {
+        Future.delayed(const Duration(milliseconds: 1000), () {
+          if (_state == TimerState.running) {
+            _startTimer();
+          }
+        });
+      }
     } else {
       _completeWorkout();
     }

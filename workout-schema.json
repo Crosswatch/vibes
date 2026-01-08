@@ -61,13 +61,24 @@
           "type": "number",
           "description": "Rest time in seconds between rounds",
           "minimum": 0
+        },
+        "transitionTime": {
+          "type": "number",
+          "description": "Transition time in seconds before starting this set (for getting into position, etc.)",
+          "minimum": 0,
+          "default": 5
+        },
+        "duration": {
+          "type": "number",
+          "description": "Optional: For rep-based sets, specify a time limit. If not set, reps require manual completion.",
+          "minimum": 0
         }
       },
       "required": ["name"],
       "oneOf": [
         {
           "description": "A leaf set with reps or time",
-          "required": ["type", "value"],
+          "required": ["type"],
           "not": {
             "required": ["sets"]
           }

@@ -94,27 +94,31 @@ class _WorkoutTimerScreenContent extends StatelessWidget {
                 
                 // Phase indicator
                 if (provider.isTransition)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[100],
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.schedule, color: Colors.blue[900], size: 20),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Get Ready',
-                          style: TextStyle(
-                            color: Colors.blue[900],
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[100],
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: Colors.blue[300]!, width: 2),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.schedule, color: Colors.blue[900], size: 24),
+                          const SizedBox(width: 8),
+                          Text(
+                            'GET READY',
+                            style: TextStyle(
+                              color: Colors.blue[900],
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                              letterSpacing: 1.5,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 
@@ -134,9 +138,10 @@ class _WorkoutTimerScreenContent extends StatelessWidget {
                 
                 // Exercise name
                 Text(
-                  provider.isTransition ? 'Next: ${exercise.displayName}' : exercise.displayName,
+                  provider.isTransition ? 'Coming Up: ${exercise.displayName}' : exercise.displayName,
                   style: Theme.of(context).textTheme.headlineLarge?.copyWith(
                     fontWeight: FontWeight.bold,
+                    color: provider.isTransition ? Colors.blue[800] : null,
                   ),
                   textAlign: TextAlign.center,
                 ),
