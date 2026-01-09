@@ -1,5 +1,10 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.13)
+
+# Force use of GCC/G++ instead of Clang (fixes libstdc++ linker issue)
+set(CMAKE_C_COMPILER "/usr/bin/gcc")
+set(CMAKE_CXX_COMPILER "/usr/bin/g++")
+
 project(runner LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change

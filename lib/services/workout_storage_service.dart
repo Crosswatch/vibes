@@ -128,18 +128,49 @@ class WorkoutStorageService {
   }
 
   /// Import a workout from a user-selected file
+  /// Returns the workout if successfully imported, or null if canceled/failed
+  /// Throws an exception with user-friendly message if workout already exists
   Future<Workout?> importWorkout() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['json'],
         dialogTitle: 'Import Workout',
+        withData: true, // Important for Android: loads file bytes
       );
 
-      if (result != null && result.files.single.path != null) {
-        final file = File(result.files.single.path!);
-        final jsonString = await file.readAsString();
-        final workout = Workout.fromJson(json.decode(jsonString));
+      if (result != null && result.files.isNotEmpty) {
+        String jsonString;
+        
+        // Try to get file content - Android typically provides bytes, desktop provides path
+        if (result.files.single.bytes != null) {
+          // Mobile/Web: Use bytes
+          jsonString = utf8.decode(result.files.single.bytes!, allowMalformed: true);
+        } else if (result.files.single.path != null) {
+          // Desktop: Use path
+          final file = File(result.files.single.path!);
+          jsonString = await file.readAsString();
+        } else {
+          throw Exception('Unable to read file');
+        }
+        
+        // Trim whitespace and remove any BOM characters
+        jsonString = jsonString.trim();
+        if (jsonString.startsWith('\uFEFF')) {
+          jsonString = jsonString.substring(1);
+        }
+        
+        // Try to parse JSON
+        final jsonData = json.decode(jsonString) as Map<String, dynamic>;
+        final workout = Workout.fromJson(jsonData);
+
+        // Check if workout already exists
+        final existingWorkouts = await loadAllWorkouts();
+        final isDuplicate = existingWorkouts.any((w) => w.name == workout.name);
+        
+        if (isDuplicate) {
+          throw Exception('DUPLICATE:${workout.name}');
+        }
 
         // Save to user directory
         await saveWorkout(workout);
@@ -149,7 +180,7 @@ class WorkoutStorageService {
       return null;
     } catch (e) {
       print('Failed to import workout: $e');
-      return null;
+      rethrow; // Rethrow to handle in UI
     }
   }
 

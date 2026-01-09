@@ -58,8 +58,7 @@ class CrosswatchApp extends StatelessWidget {
           secondary: const Color(0xFFFF6B6B), // Vibrant Coral
           tertiary: const Color(0xFF00E676), // Neon Lime
           brightness: Brightness.dark,
-          surface: const Color(0xFF132F4C), // Dark Navy surface
-          background: const Color(0xFF0A1929), // Darker Navy background
+          surface: const Color(0xFF0A1929), // Darker Navy background (now using surface instead of deprecated background)
         ),
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFF0A1929),

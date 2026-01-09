@@ -59,6 +59,46 @@ class WorkoutSet {
   /// Get effective transition time (default to 5 seconds)
   double get effectiveTransitionTime => transitionTime ?? 5.0;
 
+  /// Create a copy of this WorkoutSet with optional field overrides
+  WorkoutSet copyWith({
+    String? name,
+    String? description,
+    SetType? type,
+    double? value,
+    List<WorkoutSet>? sets,
+    int? rounds,
+    double? restBetweenRounds,
+    double? transitionTime,
+    double? duration,
+  }) {
+    return WorkoutSet(
+      name: name ?? this.name,
+      description: description ?? this.description,
+      type: type ?? this.type,
+      value: value ?? this.value,
+      sets: sets ?? (this.sets != null ? List.from(this.sets!) : null),
+      rounds: rounds ?? this.rounds,
+      restBetweenRounds: restBetweenRounds ?? this.restBetweenRounds,
+      transitionTime: transitionTime ?? this.transitionTime,
+      duration: duration ?? this.duration,
+    );
+  }
+
+  /// Create a deep copy of this WorkoutSet
+  WorkoutSet copy() {
+    return WorkoutSet(
+      name: name,
+      description: description,
+      type: type,
+      value: value,
+      sets: sets?.map((s) => s.copy()).toList(),
+      rounds: rounds,
+      restBetweenRounds: restBetweenRounds,
+      transitionTime: transitionTime,
+      duration: duration,
+    );
+  }
+
   /// Create from JSON
   factory WorkoutSet.fromJson(Map<String, dynamic> json) {
     return WorkoutSet(

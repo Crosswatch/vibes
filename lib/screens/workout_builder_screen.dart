@@ -18,6 +18,7 @@ class _WorkoutBuilderScreenState extends State<WorkoutBuilderScreen> {
   final _descriptionController = TextEditingController();
   final _storageService = WorkoutStorageService();
   final List<WorkoutSet> _sets = [];
+  final Set<int> _collapsedSets = {}; // Track which sets are collapsed
 
   @override
   void initState() {
@@ -26,6 +27,12 @@ class _WorkoutBuilderScreenState extends State<WorkoutBuilderScreen> {
       _nameController.text = widget.existingWorkout!.name;
       _descriptionController.text = widget.existingWorkout!.description ?? '';
       _sets.addAll(widget.existingWorkout!.sets);
+      // Collapse all container sets by default
+      for (int i = 0; i < _sets.length; i++) {
+        if (_sets[i].isContainer) {
+          _collapsedSets.add(i);
+        }
+      }
     }
   }
 
@@ -120,6 +127,10 @@ class _WorkoutBuilderScreenState extends State<WorkoutBuilderScreen> {
         onSave: (set) {
           setState(() {
             _sets.add(set);
+            // Collapse new container sets by default
+            if (set.isContainer) {
+              _collapsedSets.add(_sets.length - 1);
+            }
           });
         },
       ),
@@ -143,6 +154,39 @@ class _WorkoutBuilderScreenState extends State<WorkoutBuilderScreen> {
   void _deleteExercise(int index) {
     setState(() {
       _sets.removeAt(index);
+      // Update collapsed set indices after deletion
+      final newCollapsedSets = <int>{};
+      for (final collapsedIndex in _collapsedSets) {
+        if (collapsedIndex < index) {
+          newCollapsedSets.add(collapsedIndex);
+        } else if (collapsedIndex > index) {
+          newCollapsedSets.add(collapsedIndex - 1);
+        }
+      }
+      _collapsedSets.clear();
+      _collapsedSets.addAll(newCollapsedSets);
+    });
+  }
+
+  void _duplicateExercise(int index) {
+    setState(() {
+      final duplicatedSet = _sets[index].copy();
+      _sets.insert(index + 1, duplicatedSet);
+      // Update collapsed set indices after insertion
+      final newCollapsedSets = <int>{};
+      for (final collapsedIndex in _collapsedSets) {
+        if (collapsedIndex <= index) {
+          newCollapsedSets.add(collapsedIndex);
+        } else {
+          newCollapsedSets.add(collapsedIndex + 1);
+        }
+      }
+      // If the original was collapsed, also collapse the duplicate
+      if (_collapsedSets.contains(index)) {
+        newCollapsedSets.add(index + 1);
+      }
+      _collapsedSets.clear();
+      _collapsedSets.addAll(newCollapsedSets);
     });
   }
 
@@ -253,7 +297,7 @@ class _WorkoutBuilderScreenState extends State<WorkoutBuilderScreen> {
                 color: Theme.of(context).colorScheme.surface,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
+                    color: Colors.black.withValues(alpha: 0.1),
                     blurRadius: 4,
                     offset: const Offset(0, -2),
                   ),
@@ -283,71 +327,117 @@ class _WorkoutBuilderScreenState extends State<WorkoutBuilderScreen> {
   }
 
   Widget _buildSetCard(WorkoutSet set, int index) {
+    final isCollapsed = _collapsedSets.contains(index);
+    
     return Card(
       key: ValueKey(index),
       margin: const EdgeInsets.only(bottom: 8),
       child: Column(
         children: [
           ListTile(
-            leading: Icon(
-              set.isContainer ? Icons.folder : Icons.fitness_center,
-              color: set.isContainer
-                  ? Theme.of(context).colorScheme.secondary
-                  : Theme.of(context).colorScheme.primary,
+            leading: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ReorderableDragStartListener(
+                  index: index,
+                  child: const Icon(Icons.drag_handle),
+                ),
+                const SizedBox(width: 8),
+                if (set.isContainer)
+                  IconButton(
+                    icon: Icon(
+                      isCollapsed ? Icons.chevron_right : Icons.expand_more,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        if (isCollapsed) {
+                          _collapsedSets.remove(index);
+                        } else {
+                          _collapsedSets.add(index);
+                        }
+                      });
+                    },
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                Icon(
+                  set.isContainer ? Icons.folder : Icons.fitness_center,
+                  color: set.isContainer
+                      ? Theme.of(context).colorScheme.secondary
+                      : Theme.of(context).colorScheme.primary,
+                ),
+              ],
             ),
             title: Text(
               set.name,
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(_getSetDescription(set)),
-                if (set.rounds != null && set.rounds! > 1)
-                  Text(
-                    'Rounds: ${set.rounds}${set.restBetweenRounds != null ? " (${set.restBetweenRounds!.toInt()}s rest)" : ""}',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.secondary,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-              ],
-            ),
+            subtitle: Text(_getSetDescription(set)),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.drag_handle),
                 IconButton(
                   icon: const Icon(Icons.edit),
                   onPressed: () => _editExercise(index),
+                  tooltip: 'Edit',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.copy),
+                  onPressed: () => _duplicateExercise(index),
+                  tooltip: 'Duplicate',
                 ),
                 IconButton(
                   icon: const Icon(Icons.delete, color: Colors.red),
                   onPressed: () => _deleteExercise(index),
+                  tooltip: 'Delete',
                 ),
               ],
             ),
           ),
-          if (set.isContainer && set.sets != null)
+          if (set.isContainer && set.sets != null && !isCollapsed)
             Padding(
               padding: const EdgeInsets.only(left: 32, right: 16, bottom: 8),
               child: Column(
-                children: set.sets!.asMap().entries.map((entry) {
-                  final nestedSet = entry.value;
-                  return Card(
-                    color: Colors.grey[100],
-                    margin: const EdgeInsets.only(top: 4),
-                    child: ListTile(
-                      dense: true,
-                      leading: const Icon(
-                        Icons.subdirectory_arrow_right,
-                        size: 20,
-                      ),
-                      title: Text(nestedSet.name),
-                      subtitle: Text(_getSetDescription(nestedSet)),
+                children: [
+                  Text(
+                    '${set.sets!.length} exercise${set.sets!.length == 1 ? '' : 's'} in this set',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
                     ),
-                  );
-                }).toList(),
+                  ),
+                  const SizedBox(height: 4),
+                  ...set.sets!.asMap().entries.map((entry) {
+                    final nestedSet = entry.value;
+                    return Card(
+                      color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
+                      margin: const EdgeInsets.only(top: 4),
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(
+                          Icons.subdirectory_arrow_right,
+                          size: 20,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        title: Text(
+                          nestedSet.name,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        subtitle: Text(
+                          _getSetDescription(nestedSet),
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
               ),
             ),
         ],
@@ -357,12 +447,56 @@ class _WorkoutBuilderScreenState extends State<WorkoutBuilderScreen> {
 
   String _getSetDescription(WorkoutSet set) {
     if (set.isContainer) {
-      return '${set.sets?.length ?? 0} exercises';
+      final parts = <String>['${set.sets?.length ?? 0} exercises'];
+      
+      // Add rounds info
+      if (set.rounds != null && set.rounds! > 1) {
+        parts.add('${set.rounds} rounds');
+      }
+      
+      // Add rest between rounds
+      if (set.restBetweenRounds != null && set.restBetweenRounds! > 0) {
+        parts.add('${set.restBetweenRounds!.toInt()}s rest');
+      }
+      
+      // Add transition time if non-default
+      if (set.transitionTime != null && set.transitionTime! != 5.0) {
+        parts.add('${set.transitionTime!.toInt()}s transition');
+      }
+      
+      return parts.join(' • ');
     }
+    
+    // For leaf exercises
+    final parts = <String>[];
     final type = set.type == SetType.time ? 'Time' : 'Reps';
     final value = set.value?.toInt() ?? 0;
-    final unit = set.type == SetType.time ? 'seconds' : 'reps';
-    return '$type: $value $unit';
+    final unit = set.type == SetType.time ? 's' : ' reps';
+    
+    // For reps, add estimated time in parentheses
+    if (set.type == SetType.reps) {
+      final estimatedTime = set.duration?.toInt() ?? (value * 2);
+      parts.add('$type: $value$unit (~${estimatedTime}s)');
+    } else {
+      parts.add('$type: $value$unit');
+    }
+    
+    // Add rounds info
+    if (set.rounds != null && set.rounds! > 1) {
+      parts.add('${set.rounds}x');
+    }
+    
+    // Add rest between rounds
+    if (set.restBetweenRounds != null && set.restBetweenRounds! > 0) {
+      parts.add('${set.restBetweenRounds!.toInt()}s rest');
+    }
+    
+    // Add transition time if non-default
+    if (set.transitionTime != null && set.transitionTime! != 5.0) {
+      parts.add('${set.transitionTime!.toInt()}s transition');
+    }
+    
+    return parts.join(' • ');
   }
 }
 
@@ -446,9 +580,30 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
     );
   }
 
+  void _editNestedExercise(int index) {
+    showDialog(
+      context: context,
+      builder: (context) => _ExerciseDialog(
+        existingSet: _nestedSets[index],
+        onSave: (set) {
+          setState(() {
+            _nestedSets[index] = set;
+          });
+        },
+      ),
+    );
+  }
+
   void _deleteNestedExercise(int index) {
     setState(() {
       _nestedSets.removeAt(index);
+    });
+  }
+
+  void _duplicateNestedExercise(int index) {
+    setState(() {
+      final duplicatedSet = _nestedSets[index].copy();
+      _nestedSets.insert(index + 1, duplicatedSet);
     });
   }
 
@@ -545,7 +700,7 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
                 // Exercise-specific fields (if not container)
                 if (!_isContainer) ...[
                   DropdownButtonFormField<SetType>(
-                    value: _type,
+                    initialValue: _type,
                     decoration: const InputDecoration(labelText: 'Type'),
                     items: const [
                       DropdownMenuItem(
@@ -587,8 +742,8 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
                     TextFormField(
                       controller: _durationController,
                       decoration: const InputDecoration(
-                        labelText: 'Max Duration (seconds, optional)',
-                        hintText: 'Leave empty for no time limit',
+                        labelText: 'Estimated Duration (seconds, optional)',
+                        hintText: 'Default: 2s per rep',
                       ),
                       keyboardType: TextInputType.number,
                     ),
@@ -620,24 +775,54 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
                       ),
                     )
                   else
-                    ListView.builder(
+                    ReorderableListView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: _nestedSets.length,
+                      onReorder: (oldIndex, newIndex) {
+                        setState(() {
+                          if (newIndex > oldIndex) {
+                            newIndex -= 1;
+                          }
+                          final item = _nestedSets.removeAt(oldIndex);
+                          _nestedSets.insert(newIndex, item);
+                        });
+                      },
                       itemBuilder: (context, index) {
                         final set = _nestedSets[index];
                         return Card(
+                          key: ValueKey(index),
                           child: ListTile(
                             dense: true,
+                            leading: ReorderableDragStartListener(
+                              index: index,
+                              child: const Icon(Icons.drag_handle),
+                            ),
                             title: Text(set.name),
                             subtitle: Text(
                               set.type == SetType.time
                                   ? '${set.value?.toInt()}s'
                                   : '${set.value?.toInt()} reps',
                             ),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete, size: 20),
-                              onPressed: () => _deleteNestedExercise(index),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit, size: 20),
+                                  onPressed: () => _editNestedExercise(index),
+                                  tooltip: 'Edit',
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.copy, size: 20),
+                                  onPressed: () => _duplicateNestedExercise(index),
+                                  tooltip: 'Duplicate',
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete, size: 20),
+                                  onPressed: () => _deleteNestedExercise(index),
+                                  tooltip: 'Delete',
+                                ),
+                              ],
                             ),
                           ),
                         );

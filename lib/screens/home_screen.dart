@@ -45,12 +45,45 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _importWorkout() async {
-    final workout = await _storageService.importWorkout();
-    if (workout != null && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Imported "${workout.name}"')));
-      _loadWorkouts();
+    try {
+      final workout = await _storageService.importWorkout();
+      if (workout != null && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(
+          content: Text('Imported "${workout.name}"'),
+          backgroundColor: Colors.green,
+        ));
+        _loadWorkouts();
+      }
+    } catch (e) {
+      if (mounted) {
+        // Check if it's a duplicate error
+        final errorMessage = e.toString();
+        if (errorMessage.contains('DUPLICATE:')) {
+          final workoutName = errorMessage.split('DUPLICATE:')[1].replaceAll('\'', '');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Workout "$workoutName" already exists'),
+              backgroundColor: Colors.orange,
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(
+                label: 'OK',
+                textColor: Colors.white,
+                onPressed: () {},
+              ),
+            ),
+          );
+        } else {
+          // Generic error
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to import workout: ${e.toString()}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
     }
   }
 

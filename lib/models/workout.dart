@@ -55,8 +55,9 @@ class Workout {
         if (set.type == SetType.time) {
           total += set.value! * rounds;
         } else if (set.type == SetType.reps) {
-          // Assume 2 seconds per rep
-          total += (set.value! * 2) * rounds;
+          // Use specified duration, or assume 2 seconds per rep
+          final repDuration = set.duration ?? (set.value! * 2);
+          total += repDuration * rounds;
         }
       } else if (set.isContainer) {
         // Container set
@@ -68,6 +69,9 @@ class Workout {
       if (set.restBetweenRounds != null && rounds > 1) {
         total += set.restBetweenRounds! * (rounds - 1);
       }
+      
+      // Add transition time
+      total += set.effectiveTransitionTime;
     }
 
     return total;
