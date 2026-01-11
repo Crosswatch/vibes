@@ -171,8 +171,8 @@ class WorkoutImportService {
         ],
         'generationConfig': {
           'temperature': 0.1,
-          'maxOutputTokens':
-              8192, // Increased from 2048 to handle larger workouts
+          'maxOutputTokens': 16384, // Increased to handle very complex workouts
+          'stopSequences': [], // Prevent premature stopping
         },
       };
 
@@ -214,7 +214,26 @@ class WorkoutImportService {
 
       // Extract JSON from response (LLM might wrap it in markdown code blocks)
       final jsonString = _extractJson(responseText);
-      final workout = jsonDecode(jsonString) as Map<String, dynamic>;
+
+      // Try to parse the JSON
+      Map<String, dynamic> workout;
+      try {
+        workout = jsonDecode(jsonString) as Map<String, dynamic>;
+      } catch (e) {
+        print('JSON parsing failed. Extracted string (first 500 chars):');
+        print(
+          jsonString.substring(
+            0,
+            jsonString.length > 500 ? 500 : jsonString.length,
+          ),
+        );
+        print('Last 200 chars:');
+        final startPos = jsonString.length > 200 ? jsonString.length - 200 : 0;
+        print(jsonString.substring(startPos));
+        throw Exception(
+          'Failed to parse JSON: $e. The response may have been truncated. Try a simpler workout description.',
+        );
+      }
 
       // Validate the workout structure
       _validateWorkout(workout);
