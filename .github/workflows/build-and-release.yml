@@ -1,0 +1,205 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag: ${{ steps.get_version.outputs.tag }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get version from pubspec.yaml
+        id: get_version
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | tr -d '\r\n')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+      
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          if git rev-parse "v${{ steps.get_version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create tag
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.get_version.outputs.version }}" -m "Release v${{ steps.get_version.outputs.version }}"
+          git push origin "v${{ steps.get_version.outputs.version }}"
+
+  build-android:
+    runs-on: ubuntu-latest
+    needs: version
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      
+      - name: Get dependencies
+        run: flutter pub get
+      
+      - name: Build Android APK
+        run: flutter build apk --release
+      
+      - name: Build Android App Bundle
+        run: flutter build appbundle --release
+      
+      - name: Rename artifacts
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk crosswatch-${{ needs.version.outputs.version }}-android.apk
+          cp build/app/outputs/bundle/release/app-release.aab crosswatch-${{ needs.version.outputs.version }}-android.aab
+      
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: crosswatch-${{ needs.version.outputs.version }}-android.apk
+      
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-aab
+          path: crosswatch-${{ needs.version.outputs.version }}-android.aab
+
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: version
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      
+      - name: Get dependencies
+        run: flutter pub get
+      
+      - name: Build Linux app
+        run: flutter build linux --release
+      
+      - name: Create tarball
+        run: |
+          cd build/linux/x64/release/bundle
+          tar -czf ../../../../../crosswatch-${{ needs.version.outputs.version }}-linux-x64.tar.gz *
+          cd ../../../../../
+      
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: crosswatch-${{ needs.version.outputs.version }}-linux-x64.tar.gz
+
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [version, build-android, build-linux]
+    if: always() && (needs.build-android.result == 'success' || needs.build-linux.result == 'success')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+      
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat << 'EOF' > release_notes.md
+          ## Crosswatch ${{ needs.version.outputs.version }}
+          
+          ### 🎉 What's New
+          
+          CrossFit workout timer with AI-powered import, nested sets, and smart exercise tracking.
+          
+          ### 📦 Downloads
+          
+          - **Android APK**: Install directly on Android devices
+          - **Android AAB**: For Google Play Store
+          - **Linux x64**: Extract and run `./crosswatch`
+          - **Web PWA**: https://crosswatch.github.io/crosswatch-app/
+          
+          ### ✨ Features
+          
+          - ⏱️ Flexible workout timer with nested sets
+          - 🤖 AI import from URLs (CrossFit.com, etc.) or text
+          - 🔊 Audio countdown and completion cues
+          - 📱 Cross-platform: Android, iOS, Linux, Windows, macOS, Web
+          - 💾 Workout builder with drag-and-drop reordering
+          - 🔄 Rep-based and time-based exercises
+          - 📊 Automatic workout duration estimation
+          
+          ### 🌐 Web Version
+          
+          Try it now: [crosswatch.github.io/crosswatch-app](https://crosswatch.github.io/crosswatch-app/)
+          
+          Install as PWA on mobile and desktop!
+          
+          ### 📝 Release Details
+          
+          - Version: ${{ needs.version.outputs.version }}
+          - Commit: ${{ github.sha }}
+          - Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          EOF
+          
+          cat release_notes.md
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: Crosswatch ${{ needs.version.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/android-apk/*
+            artifacts/android-aab/*
+            artifacts/linux-x64/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
