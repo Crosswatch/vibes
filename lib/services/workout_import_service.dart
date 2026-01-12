@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as html_parser;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -8,6 +9,9 @@ import '../models/workout_set.dart';
 class WorkoutImportService {
   static const String _apiKeyStorageKey = 'gemini_api_key';
   static const FlutterSecureStorage _storage = FlutterSecureStorage();
+
+  // CORS proxy for web builds (allows fetching from any URL in browser)
+  static const String _corsProxy = 'https://corsproxy.io/?';
 
   /// Check if an API key is stored
   static Future<bool> hasApiKey() async {
@@ -80,7 +84,12 @@ class WorkoutImportService {
   /// Fetch workout content from a URL
   static Future<String> _fetchWorkoutFromUrl(String url) async {
     try {
-      final response = await http.get(Uri.parse(url));
+      // On web, use CORS proxy to avoid CORS restrictions
+      final fetchUrl = kIsWeb ? '$_corsProxy${Uri.encodeComponent(url)}' : url;
+
+      print('Fetching from: $fetchUrl');
+      final response = await http.get(Uri.parse(fetchUrl));
+
       if (response.statusCode != 200) {
         throw Exception('Failed to fetch URL: ${response.statusCode}');
       }
@@ -90,8 +99,7 @@ class WorkoutImportService {
 
       // Try to find the main workout content
       // This is a simple heuristic - may need refinement for specific sites
-      final mainContent =
-          document.querySelector('article') ??
+      final mainContent = document.querySelector('article') ??
           document.querySelector('main') ??
           document.querySelector('.post-content') ??
           document.querySelector('.entry-content') ??
