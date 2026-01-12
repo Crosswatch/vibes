@@ -51,8 +51,8 @@ The web version works as a Progressive Web App (PWA) - install it to your home s
 
 ### Prerequisites
 
-- **Flutter SDK**: 3.10.4 or higher
-- **Dart**: 3.10.4 or higher
+- **Flutter SDK**: 3.0.0 or higher
+- **Dart**: 3.0.0 or higher
 
 **Platform-Specific Requirements:**
 
